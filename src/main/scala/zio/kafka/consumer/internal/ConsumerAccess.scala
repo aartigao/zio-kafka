@@ -14,12 +14,10 @@ private[consumer] class ConsumerAccess(private[consumer] val consumer: ByteArray
   def withConsumer[A](f: ByteArrayKafkaConsumer => A): RIO[Blocking, A] =
     withConsumerM[Any, A](c => ZIO(f(c)))
 
-  def withConsumerM[R, A](f: ByteArrayKafkaConsumer => ZIO[R, Throwable, A]): ZIO[R with Blocking, Throwable, A] =
+  def withConsumerM[R, A](f: ByteArrayKafkaConsumer => RIO[R, A]): RIO[R with Blocking, A] =
     access.withPermit(withConsumerNoPermit(f))
 
-  private[consumer] def withConsumerNoPermit[R, A](
-    f: ByteArrayKafkaConsumer => ZIO[R, Throwable, A]
-  ): ZIO[R with Blocking, Throwable, A] =
+  private[consumer] def withConsumerNoPermit[R, A](f: ByteArrayKafkaConsumer => RIO[R, A]): RIO[R with Blocking, A] =
     blocking(ZIO.effectSuspend(f(consumer))).catchSome {
       case _: WakeupException => ZIO.interrupt
     }.fork.flatMap(fib => fib.join.onInterrupt(ZIO.effectTotal(consumer.wakeup()) *> fib.interrupt))
@@ -28,7 +26,7 @@ private[consumer] class ConsumerAccess(private[consumer] val consumer: ByteArray
 private[consumer] object ConsumerAccess {
   type ByteArrayKafkaConsumer = KafkaConsumer[Array[Byte], Array[Byte]]
 
-  def make(settings: ConsumerSettings) =
+  def make(settings: ConsumerSettings): RManaged[Blocking, ConsumerAccess] =
     for {
       access <- Semaphore.make(1).toManaged_
       consumer <- blocking {
