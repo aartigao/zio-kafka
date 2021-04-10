@@ -4,7 +4,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import zio._
-import zio.blocking.{ blocking, Blocking }
+import zio.blocking.{ blocking, effectBlocking, Blocking }
 import zio.kafka.consumer.ConsumerSettings
 import zio.kafka.consumer.internal.ConsumerAccess.ByteArrayKafkaConsumer
 
@@ -29,14 +29,12 @@ private[consumer] object ConsumerAccess {
   def make(settings: ConsumerSettings): RManaged[Blocking, ConsumerAccess] =
     for {
       access <- Semaphore.make(1).toManaged_
-      consumer <- blocking {
-                   ZIO {
-                     new KafkaConsumer[Array[Byte], Array[Byte]](
-                       settings.driverSettings.asJava,
-                       new ByteArrayDeserializer(),
-                       new ByteArrayDeserializer()
-                     )
-                   }
+      consumer <- effectBlocking {
+                   new KafkaConsumer[Array[Byte], Array[Byte]](
+                     settings.driverSettings.asJava,
+                     new ByteArrayDeserializer(),
+                     new ByteArrayDeserializer()
+                   )
                  }.toManaged(c => blocking(access.withPermit(UIO(c.close(settings.closeTimeout)))))
     } yield new ConsumerAccess(consumer, access)
 }
